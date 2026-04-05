@@ -10,8 +10,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ── Env vars ─────────────────────────────────────────────────
-const KIE_KEY    = process.env.KIE_API_KEY;
-const EL_KEY     = process.env.ELEVENLABS_API_KEY;
+const KIE_KEY     = process.env.KIE_API_KEY;
+const EL_KEY      = process.env.ELEVENLABS_API_KEY;
+const IMGBB_KEY   = process.env.IMGBB_API_KEY;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
 const KIE_BASE   = 'https://api.kie.ai/api/v1/jobs';
@@ -233,7 +234,51 @@ app.post('/api/voice/tts', async (req, res) => {
   }
 });
 
+// ── IMAGE UPLOAD (ImgBB — for model reference photos) ────────
+// Accepts base64 image, returns a permanent public URL
+// Used by frontend to host ref images so NanoBanana can access them
+app.post('/api/upload/image', async (req, res) => {
+  if (!IMGBB_KEY) return res.status(500).json({ error: 'IMGBB_API_KEY not configured — add it in Railway Variables' });
+
+  const { image, name } = req.body; // image = base64 string (no data:image/... prefix needed)
+  if (!image) return res.status(400).json({ error: 'image (base64) is required' });
+
+  try {
+    // Strip data URL prefix if present (data:image/jpeg;base64,...)
+    const base64 = image.replace(/^data:image\/[a-z]+;base64,/, '');
+
+    const form = new URLSearchParams();
+    form.append('key', IMGBB_KEY);
+    form.append('image', base64);
+    if (name) form.append('name', name);
+
+    const r = await fetch('https://api.imgbb.com/1/upload', {
+      method: 'POST',
+      body: form,
+    });
+
+    const d = await r.json();
+    if (!d.success) {
+      return res.status(400).json({ error: d.error?.message || 'ImgBB upload failed', raw: d });
+    }
+
+    res.json({
+      url: d.data.url,          // direct image URL
+      display_url: d.data.display_url,
+      delete_url: d.data.delete_url,
+    });
+  } catch (err) {
+    console.error('[upload/image]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── TEST ENDPOINTS ────────────────────────────────────────────
+app.get('/api/test/imgbb', async (req, res) => {
+  if (!IMGBB_KEY) return res.json({ connected: false, reason: 'IMGBB_API_KEY not set' });
+  res.json({ connected: true });
+});
+
 app.get('/api/test/kie', async (req, res) => {
   if (!KIE_KEY) return res.json({ connected: false, reason: 'KIE_API_KEY not set' });
   try {
